@@ -199,8 +199,7 @@ function voicingLabel(chord: Harmony) {
 function renderProgression() {
   const items = progression.map((chord, index) => `<li class="progression-chord" draggable="true" data-index="${index}">
     <button class="sequence-play" data-play-index="${index}" title="Play chord"><strong>${chordLabel(chord)}</strong><span>${chordNotes(chord).map(noteName).join(" · ")}</span><em>${chord.duration} beat${chord.duration === 1 ? "" : "s"} · ${voicingLabel(chord)}</em></button>
-    <div class="quick-voicing" aria-label="Quick voicing controls"><button data-card-bump="up" data-card-index="${index}" title="Bump bottom note up an octave">↑</button><button data-card-bump="down" data-card-index="${index}" title="Bump top note down an octave">↓</button></div>
-    <button class="more" data-menu-index="${index}" title="Chord options" aria-label="Chord options">•••</button>
+    <aside class="card-sidebar"><button class="card-delete" data-card-delete="${index}" title="Remove chord" aria-label="Remove ${chordLabel(chord)}">×</button><div class="card-voicing" aria-label="Quick voicing controls"><button data-card-bump="up" data-card-index="${index}" title="Bump bottom note up an octave">↑</button><button data-card-bump="down" data-card-index="${index}" title="Bump top note down an octave">↓</button></div><button class="more" data-menu-index="${index}" title="Chord options" aria-label="Chord options">•••</button></aside>
   </li>`).join("");
   return `<section class="sequence-area">
     <div class="sequence-heading"><span>PROGRESSION <b>${progression.length || "—"} chord${progression.length === 1 ? "" : "s"}</b></span>
@@ -254,7 +253,7 @@ function bindEvents() {
   document.querySelectorAll<HTMLElement>(".progression-chord").forEach(item => {
     item.addEventListener("contextmenu", event => { event.preventDefault(); contextMenuIndex = Number(item.dataset.index); render(); });
     item.addEventListener("dragstart", event => { event.dataTransfer?.setData("text/plain", item.dataset.index!); if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"; item.classList.add("dragging"); });
-    item.addEventListener("dragend", () => document.querySelectorAll(".drag-over, .dragging").forEach(element => element.classList.remove("drag-over", "dragging")));
+    item.addEventListener("dragend", event => { document.querySelectorAll(".drag-over, .dragging").forEach(element => element.classList.remove("drag-over", "dragging")); if (event.dataTransfer?.dropEffect === "none") { progression.splice(Number(item.dataset.index), 1); render(); } });
     item.addEventListener("dragover", event => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = "move"; document.querySelectorAll(".drag-over").forEach(element => element.classList.remove("drag-over")); item.classList.add("drag-over"); });
     item.addEventListener("dragleave", () => item.classList.remove("drag-over"));
     item.addEventListener("drop", event => { event.preventDefault(); const serialized = event.dataTransfer?.getData("application/x-roman-chord"); const to = Number(item.dataset.index); if (serialized) { event.stopPropagation(); try { const chord = JSON.parse(serialized) as Harmony; progression.splice(to, 0, { ...chord, notes: chordNotes(chord) }); } catch { /* Ignore invalid external drag data. */ } render(); return; } const from = Number(event.dataTransfer?.getData("text/plain")); if (from !== to) { const [moved] = progression.splice(from, 1); progression.splice(to, 0, moved); } render(); });
@@ -263,6 +262,7 @@ function bindEvents() {
   document.querySelectorAll<HTMLButtonElement>("[data-duration]").forEach(button => button.addEventListener("click", () => { if (contextMenuIndex !== null) progression[contextMenuIndex].duration = Number(button.dataset.duration); render(); }));
   document.querySelectorAll<HTMLButtonElement>("[data-bump]").forEach(button => button.addEventListener("click", () => { if (contextMenuIndex === null) return; bumpChord(progression[contextMenuIndex], button.dataset.bump === "up" ? "up" : "down"); render(); }));
   document.querySelectorAll<HTMLButtonElement>("[data-card-bump]").forEach(button => button.addEventListener("click", () => { const chord = progression[Number(button.dataset.cardIndex)]; bumpChord(chord, button.dataset.cardBump === "up" ? "up" : "down"); render(); }));
+  document.querySelectorAll<HTMLButtonElement>("[data-card-delete]").forEach(button => button.addEventListener("click", () => { progression.splice(Number(button.dataset.cardDelete), 1); render(); }));
   document.querySelector("[data-delete]")?.addEventListener("click", () => { if (contextMenuIndex !== null) progression.splice(contextMenuIndex, 1); contextMenuIndex = null; render(); });
 }
 
