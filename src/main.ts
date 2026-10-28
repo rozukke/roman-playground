@@ -366,28 +366,15 @@ function bindEvents() {
   document.querySelector("#clear")?.addEventListener("click", () => { stopLoop(); progression = []; render(); });
   document.querySelector("#play-progression")?.addEventListener("click", () => isLooping ? stopLoop() : startLoop());
   document.querySelectorAll<HTMLButtonElement>("[data-play-index]").forEach(button => {
-    let longPressTimer: number | undefined;
-    let longPressOpened = false;
-    button.addEventListener("click", () => {
-      if (longPressOpened) return;
+    button.addEventListener("click", event => {
+      if (button.dataset.suppressClick === "true") {
+        delete button.dataset.suppressClick;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
       playChord(progression[Number(button.dataset.playIndex)]);
     });
-    button.addEventListener("pointerdown", () => {
-      if (!window.matchMedia("(max-width: 560px)").matches) return;
-      longPressOpened = false;
-      longPressTimer = window.setTimeout(() => {
-        longPressOpened = true;
-        contextMenuIndex = Number(button.dataset.playIndex);
-        render();
-      }, 500);
-    });
-    const cancelLongPress = () => {
-      if (longPressTimer) window.clearTimeout(longPressTimer);
-      longPressTimer = undefined;
-    };
-    button.addEventListener("pointerup", cancelLongPress);
-    button.addEventListener("pointercancel", cancelLongPress);
-    button.addEventListener("pointerleave", cancelLongPress);
   });
   document.querySelectorAll<HTMLButtonElement>("[data-menu-index]").forEach(button => button.addEventListener("click", () => { contextMenuIndex = Number(button.dataset.menuIndex); render(); }));
   document.querySelector("#progression")?.addEventListener("dragover", event => {
@@ -451,6 +438,102 @@ function bindEvents() {
   document.querySelectorAll<HTMLButtonElement>("[data-card-bump]").forEach(button => button.addEventListener("click", () => { const chord = progression[Number(button.dataset.cardIndex)]; bumpChord(chord, button.dataset.cardBump === "up" ? "up" : "down"); render(); }));
   document.querySelectorAll<HTMLButtonElement>("[data-card-delete]").forEach(button => button.addEventListener("click", () => { progression.splice(Number(button.dataset.cardDelete), 1); render(); }));
   document.querySelector("[data-delete]")?.addEventListener("click", () => { if (contextMenuIndex !== null) progression.splice(contextMenuIndex, 1); contextMenuIndex = null; render(); });
+  bindMobileTouchGestures();
+}
+
+function bindMobileTouchGestures() {
+  if (!window.matchMedia("(max-width: 560px)").matches) return;
+
+  document.querySelectorAll<HTMLButtonElement>("[data-chord]").forEach(button => {
+    button.draggable = false;
+    let pointerId: number | undefined;
+    let startX = 0;
+    let startY = 0;
+    let dragging = false;
+    let suppressClick = false;
+
+    button.addEventListener("pointerdown", event => {
+      if (!event.isPrimary || event.button !== 0 || mode !== "play") return;
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startY = event.clientY;
+      dragging = false;
+      button.setPointerCapture?.(event.pointerId);
+    });
+    button.addEventListener("pointermove", event => {
+      if (event.pointerId !== pointerId) return;
+      if (!dragging && Math.hypot(event.clientX - startX, event.clientY - startY) > 8) {
+        dragging = true;
+        button.classList.add("dragging");
+      }
+      if (dragging) event.preventDefault();
+    });
+    button.addEventListener("pointerup", event => {
+      if (event.pointerId !== pointerId) return;
+      pointerId = undefined;
+      button.releasePointerCapture?.(event.pointerId);
+      button.classList.remove("dragging");
+      if (!dragging) return;
+
+      suppressClick = true;
+      const target = document.elementFromPoint(event.clientX, event.clientY);
+      const targetCard = target?.closest<HTMLElement>(".progression-chord");
+      const serialized = button.dataset.chord;
+      if (serialized && (targetCard || isOverProgression(event as unknown as DragEvent))) {
+        try {
+          const chord = JSON.parse(serialized) as Harmony;
+          const index = targetCard ? dropIndex(event as unknown as DragEvent, targetCard) : progression.length;
+          progression.splice(index, 0, { ...chord, notes: chordNotes(chord) });
+          render();
+        } catch { /* Ignore invalid chord data. */ }
+      }
+    });
+    button.addEventListener("pointercancel", () => {
+      pointerId = undefined;
+      button.classList.remove("dragging");
+    });
+    button.addEventListener("click", event => {
+      if (!suppressClick) return;
+      suppressClick = false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-play-index]").forEach(button => {
+    const card = button.closest<HTMLElement>(".progression-chord");
+    if (card) card.draggable = false;
+    let timer: number | undefined;
+    let pointerId: number | undefined;
+    let startX = 0;
+    let startY = 0;
+    const cancel = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = undefined;
+    };
+    button.addEventListener("pointerdown", event => {
+      if (!event.isPrimary || event.button !== 0) return;
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startY = event.clientY;
+      button.setPointerCapture?.(event.pointerId);
+      timer = window.setTimeout(() => {
+        button.dataset.suppressClick = "true";
+        contextMenuIndex = Number(button.dataset.playIndex);
+        render();
+      }, 500);
+    });
+    button.addEventListener("pointermove", event => {
+      if (event.pointerId === pointerId && Math.hypot(event.clientX - startX, event.clientY - startY) > 8) cancel();
+    });
+    button.addEventListener("pointerup", event => {
+      if (event.pointerId === pointerId) {
+        cancel();
+        pointerId = undefined;
+      }
+    });
+    button.addEventListener("pointercancel", cancel);
+  });
 }
 
 function bumpChord(chord: Harmony, direction: "up" | "down") {

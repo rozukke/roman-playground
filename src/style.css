@@ -586,6 +586,25 @@ footer a,
     align-content: start;
     padding-block: 20px;
   }
+  .sequence-area,
+  .progression {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .progression {
+    width: 100%;
+    flex-wrap: nowrap;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+  }
+  .progression-chord {
+    flex: none;
+    width: 142px;
+    min-width: 142px;
+    max-width: 142px;
+  }
   .chord-grid {
     grid-template-columns: repeat(7, minmax(117px, 1fr));
     overflow-x: auto;
@@ -635,11 +654,7 @@ footer a,
     margin-bottom: 7px;
   }
   .progression {
-    flex-wrap: nowrap;
     min-height: 76px;
-    max-height: none;
-    overflow-x: auto;
-    overflow-y: hidden;
     padding: 2px 4px 5px 2px;
   }
   .progression.empty {
@@ -647,9 +662,20 @@ footer a,
     padding: 0 9px;
   }
   .progression-chord {
-    flex: 0 0 142px;
-    min-width: 142px;
+    overflow: hidden;
     box-shadow: 2px 2px var(--ink);
+  }
+  .sequence-play {
+    min-width: 0;
+    overflow: hidden;
+  }
+  .sequence-play span,
+  .sequence-play em {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chord {
+    touch-action: none;
   }
   .sequence-play {
     min-height: 72px;
