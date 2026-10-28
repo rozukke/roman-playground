@@ -365,7 +365,30 @@ function bindEvents() {
   });
   document.querySelector("#clear")?.addEventListener("click", () => { stopLoop(); progression = []; render(); });
   document.querySelector("#play-progression")?.addEventListener("click", () => isLooping ? stopLoop() : startLoop());
-  document.querySelectorAll<HTMLButtonElement>("[data-play-index]").forEach(button => button.addEventListener("click", () => playChord(progression[Number(button.dataset.playIndex)])));
+  document.querySelectorAll<HTMLButtonElement>("[data-play-index]").forEach(button => {
+    let longPressTimer: number | undefined;
+    let longPressOpened = false;
+    button.addEventListener("click", () => {
+      if (longPressOpened) return;
+      playChord(progression[Number(button.dataset.playIndex)]);
+    });
+    button.addEventListener("pointerdown", () => {
+      if (!window.matchMedia("(max-width: 560px)").matches) return;
+      longPressOpened = false;
+      longPressTimer = window.setTimeout(() => {
+        longPressOpened = true;
+        contextMenuIndex = Number(button.dataset.playIndex);
+        render();
+      }, 500);
+    });
+    const cancelLongPress = () => {
+      if (longPressTimer) window.clearTimeout(longPressTimer);
+      longPressTimer = undefined;
+    };
+    button.addEventListener("pointerup", cancelLongPress);
+    button.addEventListener("pointercancel", cancelLongPress);
+    button.addEventListener("pointerleave", cancelLongPress);
+  });
   document.querySelectorAll<HTMLButtonElement>("[data-menu-index]").forEach(button => button.addEventListener("click", () => { contextMenuIndex = Number(button.dataset.menuIndex); render(); }));
   document.querySelector("#progression")?.addEventListener("dragover", event => {
     const dragEvent = event as DragEvent;
