@@ -41,6 +41,40 @@ input {
 button {
   cursor: pointer;
 }
+.drag-preview {
+  position: fixed;
+  z-index: 10;
+  top: 0;
+  left: 0;
+  margin: 0;
+  pointer-events: none;
+  opacity: 0.82;
+  transform-origin: top left;
+  filter: drop-shadow(4px 5px 0 #393d4388);
+}
+.drop-indicator {
+  position: fixed;
+  z-index: 11;
+  width: 5px;
+  min-height: 28px;
+  border-radius: 3px;
+  pointer-events: none;
+  background: #ba7466;
+  box-shadow: 1px 0 var(--paper), -1px 0 var(--paper);
+  opacity: 0;
+  transition: opacity 0.08s;
+}
+.drop-indicator.visible {
+  opacity: 1;
+}
+.progression.drop-active.empty {
+  border-color: #ba7466;
+  background: #f4d4c8;
+}
+.chord,
+.sequence-play {
+  touch-action: none;
+}
 header {
   min-height: 72px;
   border-bottom: 2px solid var(--ink);
@@ -202,11 +236,6 @@ select {
 .progression-chord.dragging {
   opacity: 0.42;
   transform: rotate(2deg);
-}
-.progression-chord.drag-over {
-  transform: translateY(-5px);
-  background: var(--mint);
-  box-shadow: 5px 6px var(--ink);
 }
 .sequence-play {
   width: 100%;
@@ -393,10 +422,7 @@ fieldset small {
     box-shadow 0.08s,
     background 0.08s;
 }
-.chord[draggable="true"] {
-  cursor: grab;
-}
-.chord[draggable="true"].dragging {
+.chord.dragging {
   cursor: grabbing;
   opacity: 0.55;
 }
@@ -673,9 +699,6 @@ footer a,
   .sequence-play em {
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-  .chord {
-    touch-action: none;
   }
   .sequence-play {
     min-height: 72px;

@@ -1,4 +1,5 @@
 import "./style.css";
+import { DragController } from "./drag-controller";
 
 type Mode = "play" | "add";
 type Instrument = "piano" | "sine";
@@ -248,7 +249,7 @@ function selectChord(chord: Harmony) {
 
 function chordButton(chord: Harmony, kind: "main" | "variant" | "secondary" = "main") {
   const notes = chordNotes(chord).map(noteName).join(" · ");
-  return `<button class="chord ${kind}" data-chord='${JSON.stringify(chord)}' draggable="${mode === "play"}" aria-label="${chordLabel(chord)}: ${notes}">
+  return `<button class="chord ${kind}" data-chord='${JSON.stringify(chord)}' aria-label="${chordLabel(chord)}: ${notes}">
     <strong>${chordLabel(chord)}</strong><span>${notes}</span>
   </button>`;
 }
@@ -301,7 +302,7 @@ function voicingLabel(chord: Harmony) {
 }
 
 function renderProgression() {
-  const items = progression.map((chord, index) => `<li class="progression-chord" draggable="true" data-index="${index}">
+  const items = progression.map((chord, index) => `<li class="progression-chord" data-index="${index}">
     <button class="sequence-play" data-play-index="${index}" title="Play chord"><strong>${chordLabel(chord)}</strong><span>${chordNotes(chord).map(noteName).join(" · ")}</span><em>${chord.duration} beat${chord.duration === 1 ? "" : "s"} · ${voicingLabel(chord)}</em></button>
     <aside class="card-sidebar"><button class="card-delete" data-card-delete="${index}" title="Remove chord" aria-label="Remove ${chordLabel(chord)}">×</button><div class="card-voicing" aria-label="Quick voicing controls"><button data-card-bump="up" data-card-index="${index}" title="Bump bottom note up an octave">↑</button><button data-card-bump="down" data-card-index="${index}" title="Bump top note down an octave">↓</button></div><button class="more" data-menu-index="${index}" title="Chord options" aria-label="Chord options">•••</button></aside>
   </li>`).join("");
@@ -336,19 +337,6 @@ function render() {
   bindEvents();
 }
 
-function dropIndex(event: DragEvent, item: HTMLElement) {
-  const index = Number(item.dataset.index);
-  const bounds = item.getBoundingClientRect();
-  return event.clientX < bounds.left + bounds.width / 2 ? index : index + 1;
-}
-
-function isOverProgression(event: DragEvent) {
-  const progressionStrip = document.querySelector("#progression");
-  if (!progressionStrip) return false;
-  const bounds = progressionStrip.getBoundingClientRect();
-  return event.clientX >= bounds.left && event.clientX <= bounds.right && event.clientY >= bounds.top && event.clientY <= bounds.bottom;
-}
-
 function bindEvents() {
   document.querySelector("#key-select")?.addEventListener("change", event => { selectedKey = (event.target as HTMLSelectElement).value; render(); });
   document.querySelector("#volume")?.addEventListener("input", event => { volume = Number((event.target as HTMLInputElement).value); if (audioContext && masterGain) masterGain.gain.setValueAtTime(volume, audioContext.currentTime); });
@@ -360,77 +348,15 @@ function bindEvents() {
   document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.addEventListener("click", () => { mode = button.dataset.mode as Mode; render(); }));
   document.querySelectorAll<HTMLButtonElement>("[data-chord]").forEach(button => {
     button.addEventListener("click", () => selectChord(JSON.parse(button.dataset.chord!)));
-    button.addEventListener("dragstart", event => { if (mode !== "play" || !event.dataTransfer) return; event.dataTransfer.setData("application/x-roman-chord", button.dataset.chord!); event.dataTransfer.effectAllowed = "copy"; button.classList.add("dragging"); });
-    button.addEventListener("dragend", () => button.classList.remove("dragging"));
   });
   document.querySelector("#clear")?.addEventListener("click", () => { stopLoop(); progression = []; render(); });
   document.querySelector("#play-progression")?.addEventListener("click", () => isLooping ? stopLoop() : startLoop());
   document.querySelectorAll<HTMLButtonElement>("[data-play-index]").forEach(button => {
-    button.addEventListener("click", event => {
-      if (button.dataset.suppressClick === "true") {
-        delete button.dataset.suppressClick;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        return;
-      }
-      playChord(progression[Number(button.dataset.playIndex)]);
-    });
+    button.addEventListener("click", () => playChord(progression[Number(button.dataset.playIndex)]));
   });
   document.querySelectorAll<HTMLButtonElement>("[data-menu-index]").forEach(button => button.addEventListener("click", () => { contextMenuIndex = Number(button.dataset.menuIndex); render(); }));
-  document.querySelector("#progression")?.addEventListener("dragover", event => {
-    const dragEvent = event as DragEvent;
-    if (!dragEvent.dataTransfer?.types.includes("application/x-roman-chord")) return;
-    dragEvent.preventDefault();
-    dragEvent.dataTransfer.dropEffect = "copy";
-  });
-  document.querySelector("#progression")?.addEventListener("drop", event => {
-    const dragEvent = event as DragEvent;
-    const serialized = dragEvent.dataTransfer?.getData("application/x-roman-chord");
-    if (!serialized) return;
-    dragEvent.preventDefault();
-    try {
-      const chord = JSON.parse(serialized) as Harmony;
-      progression.push({ ...chord, notes: chordNotes(chord) });
-      render();
-    } catch { /* Ignore invalid external drag data. */ }
-  });
   document.querySelectorAll<HTMLElement>(".progression-chord").forEach(item => {
     item.addEventListener("contextmenu", event => { event.preventDefault(); contextMenuIndex = Number(item.dataset.index); render(); });
-    item.addEventListener("dragstart", event => { event.dataTransfer?.setData("text/plain", item.dataset.index!); if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"; item.classList.add("dragging"); });
-    item.addEventListener("dragend", event => {
-      document.querySelectorAll(".drag-over, .dragging").forEach(element => element.classList.remove("drag-over", "dragging"));
-      if (!isOverProgression(event as DragEvent)) {
-        progression.splice(Number(item.dataset.index), 1);
-        render();
-      }
-    });
-    item.addEventListener("dragover", event => {
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = event.dataTransfer.types.includes("application/x-roman-chord") ? "copy" : "move";
-      document.querySelectorAll(".drag-over").forEach(element => element.classList.remove("drag-over"));
-      item.classList.add("drag-over");
-    });
-    item.addEventListener("dragleave", () => item.classList.remove("drag-over"));
-    item.addEventListener("drop", event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const serialized = event.dataTransfer?.getData("application/x-roman-chord");
-      const to = dropIndex(event as DragEvent, item);
-      if (serialized) {
-        try {
-          const chord = JSON.parse(serialized) as Harmony;
-          progression.splice(to, 0, { ...chord, notes: chordNotes(chord) });
-        } catch { /* Ignore invalid external drag data. */ }
-        render();
-        return;
-      }
-      const from = Number(event.dataTransfer?.getData("text/plain"));
-      if (Number.isInteger(from) && from >= 0 && from < progression.length) {
-        const [moved] = progression.splice(from, 1);
-        progression.splice(from < to ? to - 1 : to, 0, moved);
-      }
-      render();
-    });
   });
   document.querySelector("[data-close-menu]")?.addEventListener("click", () => { contextMenuIndex = null; render(); });
   document.querySelectorAll<HTMLButtonElement>("[data-duration]").forEach(button => button.addEventListener("click", () => { if (contextMenuIndex !== null) progression[contextMenuIndex].duration = Number(button.dataset.duration); render(); }));
@@ -438,102 +364,28 @@ function bindEvents() {
   document.querySelectorAll<HTMLButtonElement>("[data-card-bump]").forEach(button => button.addEventListener("click", () => { const chord = progression[Number(button.dataset.cardIndex)]; bumpChord(chord, button.dataset.cardBump === "up" ? "up" : "down"); render(); }));
   document.querySelectorAll<HTMLButtonElement>("[data-card-delete]").forEach(button => button.addEventListener("click", () => { progression.splice(Number(button.dataset.cardDelete), 1); render(); }));
   document.querySelector("[data-delete]")?.addEventListener("click", () => { if (contextMenuIndex !== null) progression.splice(contextMenuIndex, 1); contextMenuIndex = null; render(); });
-  bindMobileTouchGestures();
+  bindDragInteractions();
 }
 
-function bindMobileTouchGestures() {
-  if (!window.matchMedia("(max-width: 560px)").matches) return;
-
-  document.querySelectorAll<HTMLButtonElement>("[data-chord]").forEach(button => {
-    button.draggable = false;
-    let pointerId: number | undefined;
-    let startX = 0;
-    let startY = 0;
-    let dragging = false;
-    let suppressClick = false;
-
-    button.addEventListener("pointerdown", event => {
-      if (!event.isPrimary || event.button !== 0 || mode !== "play") return;
-      pointerId = event.pointerId;
-      startX = event.clientX;
-      startY = event.clientY;
-      dragging = false;
-      button.setPointerCapture?.(event.pointerId);
-    });
-    button.addEventListener("pointermove", event => {
-      if (event.pointerId !== pointerId) return;
-      if (!dragging && Math.hypot(event.clientX - startX, event.clientY - startY) > 8) {
-        dragging = true;
-        button.classList.add("dragging");
-      }
-      if (dragging) event.preventDefault();
-    });
-    button.addEventListener("pointerup", event => {
-      if (event.pointerId !== pointerId) return;
-      pointerId = undefined;
-      button.releasePointerCapture?.(event.pointerId);
-      button.classList.remove("dragging");
-      if (!dragging) return;
-
-      suppressClick = true;
-      const target = document.elementFromPoint(event.clientX, event.clientY);
-      const targetCard = target?.closest<HTMLElement>(".progression-chord");
-      const serialized = button.dataset.chord;
-      if (serialized && (targetCard || isOverProgression(event as unknown as DragEvent))) {
-        try {
-          const chord = JSON.parse(serialized) as Harmony;
-          const index = targetCard ? dropIndex(event as unknown as DragEvent, targetCard) : progression.length;
-          progression.splice(index, 0, { ...chord, notes: chordNotes(chord) });
-          render();
-        } catch { /* Ignore invalid chord data. */ }
-      }
-    });
-    button.addEventListener("pointercancel", () => {
-      pointerId = undefined;
-      button.classList.remove("dragging");
-    });
-    button.addEventListener("click", event => {
-      if (!suppressClick) return;
-      suppressClick = false;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    }, true);
+function bindDragInteractions() {
+  const drag = new DragController<Harmony>({
+    progression: () => document.querySelector<HTMLElement>("#progression"),
+    paletteSources: () => [...document.querySelectorAll<HTMLButtonElement>("[data-chord]")].map(button => [button, JSON.parse(button.dataset.chord!) as Harmony] as [HTMLButtonElement, Harmony]),
+    progressionSources: () => [...document.querySelectorAll<HTMLButtonElement>("[data-play-index]")].map(button => [button, Number(button.dataset.playIndex)] as [HTMLButtonElement, number]),
+    paletteDragEnabled: () => mode === "play",
+    insert: (index, chord) => {
+      progression.splice(index, 0, { ...chord, notes: chordNotes(chord) });
+      render();
+    },
+    move: (from, to) => {
+      if (from === to || from + 1 === to) return;
+      const [moved] = progression.splice(from, 1);
+      progression.splice(from < to ? to - 1 : to, 0, moved);
+      render();
+    },
+    openMenu: index => { contextMenuIndex = index; render(); },
   });
-
-  document.querySelectorAll<HTMLButtonElement>("[data-play-index]").forEach(button => {
-    const card = button.closest<HTMLElement>(".progression-chord");
-    if (card) card.draggable = false;
-    let timer: number | undefined;
-    let pointerId: number | undefined;
-    let startX = 0;
-    let startY = 0;
-    const cancel = () => {
-      if (timer !== undefined) window.clearTimeout(timer);
-      timer = undefined;
-    };
-    button.addEventListener("pointerdown", event => {
-      if (!event.isPrimary || event.button !== 0) return;
-      pointerId = event.pointerId;
-      startX = event.clientX;
-      startY = event.clientY;
-      button.setPointerCapture?.(event.pointerId);
-      timer = window.setTimeout(() => {
-        button.dataset.suppressClick = "true";
-        contextMenuIndex = Number(button.dataset.playIndex);
-        render();
-      }, 500);
-    });
-    button.addEventListener("pointermove", event => {
-      if (event.pointerId === pointerId && Math.hypot(event.clientX - startX, event.clientY - startY) > 8) cancel();
-    });
-    button.addEventListener("pointerup", event => {
-      if (event.pointerId === pointerId) {
-        cancel();
-        pointerId = undefined;
-      }
-    });
-    button.addEventListener("pointercancel", cancel);
-  });
+  drag.bind();
 }
 
 function bumpChord(chord: Harmony, direction: "up" | "down") {
