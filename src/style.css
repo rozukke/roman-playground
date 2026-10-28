@@ -573,8 +573,18 @@ footer a,
   font: 11px "DM Mono", monospace;
   font-weight: 500;
 }
+.settings-row select,
+.settings-row input {
+  border: 2px solid var(--ink);
+  padding: 6px 8px;
+  background: var(--paper);
+  font: 12px "DM Mono", monospace;
+}
 .settings-row select {
   padding-block: 6px;
+}
+.mobile-music-settings {
+  display: none;
 }
 .bleed-toggle {
   display: grid;
@@ -683,28 +693,31 @@ footer a,
     gap: 7px;
   }
 }
-@media (max-width: 560px) {
+/* Includes touch devices whose browser reports a wider layout viewport. */
+@media (max-width: 860px) and (pointer: coarse), (max-width: 560px) {
   header {
-    flex-wrap: wrap;
-    gap: 12px;
+    min-height: 0;
+    padding-block: 8px;
+    justify-content: center;
+  }
+  .logo,
+  .controls .key-control,
+  .controls .tempo-control {
+    display: none;
+  }
+  .mobile-music-settings {
+    display: block;
   }
   .controls {
-    flex: 0 0 100%;
     width: 100%;
     min-width: 0;
     flex-direction: row;
     align-items: center;
-    justify-content: flex-start;
-    gap: 5px;
-  }
-  .controls label {
-    display: flex;
+    justify-content: center;
+    gap: 9px;
   }
   .volume-control input {
     width: 58px;
-  }
-  .tempo-control input {
-    width: 48px;
   }
   .sequence-area {
     padding-block: 10px 12px;

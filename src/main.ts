@@ -287,6 +287,11 @@ function renderSettings() {
         <label class="bleed-toggle"><input id="bleed-reverb" type="checkbox" ${bleedReverb ? "checked" : ""} /><span>BLEED REVERB BETWEEN CHORDS</span><b>${bleedReverb ? "ON" : "OFF"}</b></label>
         <small class="settings-help">Reverb is always active; enable bleed to let its tail continue into the next chord.</small>
       </section>
+      <section class="settings-section mobile-music-settings">
+        <h3>MUSIC</h3>
+        <div class="settings-row"><label for="settings-key-select">KEY</label><select id="settings-key-select">${keyChoices.map(key => `<option ${key === selectedKey ? "selected" : ""}>${key}</option>`).join("")}</select></div>
+        <div class="settings-row"><label for="settings-tempo">BPM</label><input id="settings-tempo" type="number" min="40" max="240" step="1" value="${tempo}" /></div>
+      </section>
       <h3>ABOUT</h3>
       <p><b>Roman Playground</b> is a tiny, browser-only space for trying harmonic ideas by ear.</p>
       <h3>HOW TO USE IT</h3>
@@ -330,7 +335,7 @@ function renderMenu(index: number) {
 function render() {
   saveState();
   app.innerHTML = `<header><a class="logo" href="/">ROMAN<br><i>PLAYGROUND</i></a>
-    <div class="controls"><label>KEY <select id="key-select">${keyChoices.map(key => `<option ${key === selectedKey ? "selected" : ""}>${key}</option>`).join("")}</select></label>
+    <div class="controls"><label class="key-control">KEY <select id="key-select">${keyChoices.map(key => `<option ${key === selectedKey ? "selected" : ""}>${key}</option>`).join("")}</select></label>
       <label class="volume-control">VOL <input id="volume" type="range" min="0" max="1" step="0.05" value="${volume}" aria-label="Volume" /></label>
       <label class="tempo-control">BPM <input id="tempo" type="number" min="40" max="240" step="1" value="${tempo}" aria-label="Tempo in beats per minute" /></label>
       <div class="mode-toggle" role="group" aria-label="Chord action"><button data-mode="play" class="${mode === "play" ? "active" : ""}">♬ HEAR</button><button data-mode="add" class="${mode === "add" ? "active" : ""}">+ ADD</button></div>
@@ -341,9 +346,13 @@ function render() {
 }
 
 function bindEvents() {
-  document.querySelector("#key-select")?.addEventListener("change", event => { selectedKey = (event.target as HTMLSelectElement).value; render(); });
+  const setKey = (event: Event) => { selectedKey = (event.target as HTMLSelectElement).value; render(); };
+  document.querySelector("#key-select")?.addEventListener("change", setKey);
+  document.querySelector("#settings-key-select")?.addEventListener("change", setKey);
   document.querySelector("#volume")?.addEventListener("input", event => { volume = Number((event.target as HTMLInputElement).value); if (audioContext && masterGain) masterGain.gain.setValueAtTime(volume, audioContext.currentTime); });
-  document.querySelector("#tempo")?.addEventListener("change", event => { const input = event.target as HTMLInputElement; tempo = Math.min(240, Math.max(40, Number(input.value) || 88)); input.value = String(tempo); });
+  const setTempo = (event: Event) => { const input = event.target as HTMLInputElement; tempo = Math.min(240, Math.max(40, Number(input.value) || 88)); input.value = String(tempo); };
+  document.querySelector("#tempo")?.addEventListener("change", setTempo);
+  document.querySelector("#settings-tempo")?.addEventListener("change", setTempo);
   document.querySelector("#bleed-reverb")?.addEventListener("change", event => { bleedReverb = (event.target as HTMLInputElement).checked; render(); });
   document.querySelector("#instrument-select")?.addEventListener("change", event => { instrument = (event.target as HTMLSelectElement).value as Instrument; render(); });
   document.querySelector("[data-open-settings]")?.addEventListener("click", () => { showSettings = true; render(); });
@@ -420,7 +429,7 @@ function bindDragInteractions() {
     progression: () => document.querySelector<HTMLElement>("#progression"),
     paletteSources: () => [...document.querySelectorAll<HTMLButtonElement>("[data-chord]")].map(button => [button, JSON.parse(button.dataset.chord!) as Harmony] as [HTMLButtonElement, Harmony]),
     progressionSources: () => {
-      const mobile = window.matchMedia("(max-width: 560px)").matches;
+      const mobile = window.matchMedia("(max-width: 860px) and (pointer: coarse), (max-width: 560px)").matches;
       const selector = mobile ? "[data-drag-index]" : "[data-play-index]";
       const dataKey = mobile ? "dragIndex" : "playIndex";
       return [...document.querySelectorAll<HTMLButtonElement>(selector)].map(button => [button, Number(button.dataset[dataKey])] as [HTMLButtonElement, number]);
