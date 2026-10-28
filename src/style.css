@@ -126,6 +126,9 @@ select {
   border: 2px solid var(--ink);
   background: var(--lilac);
 }
+.about-button.active {
+  background: var(--mint);
+}
 .sequence-area {
   position: relative;
   padding: 13px clamp(16px, 3vw, 48px) 16px;
@@ -484,6 +487,61 @@ footer a,
   padding: 18px;
   background: var(--paper);
   box-shadow: 7px 7px var(--ink);
+}
+.settings-dialog {
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+}
+.settings-section {
+  margin: 16px 0 0;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--ink);
+}
+.settings-section h3 {
+  margin: 0 0 9px;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-row label,
+.bleed-toggle {
+  font: 11px "DM Mono", monospace;
+  font-weight: 500;
+}
+.settings-row select {
+  padding-block: 6px;
+}
+.bleed-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  border: 2px solid var(--ink);
+  padding: 8px 9px;
+  background: var(--sage);
+  cursor: pointer;
+}
+.bleed-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #568f86;
+}
+.bleed-toggle b {
+  padding-left: 8px;
+  border-left: 2px solid var(--ink);
+  font-size: 10px;
+}
+.settings-help {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font: 10px "DM Mono", monospace;
+  line-height: 1.4;
 }
 .about-title {
   display: flex;

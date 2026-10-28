@@ -1,6 +1,7 @@
 import "./style.css";
 
 type Mode = "play" | "add";
+type Instrument = "piano" | "sine";
 type Quality = "major" | "minor" | "diminished";
 type Variant = "triad" | "seventh" | "sixth" | "sus2" | "sus4" | "add9";
 
@@ -35,29 +36,52 @@ let progression: Harmony[] = [];
 let isLooping = false;
 let loopTimer: number | undefined;
 let contextMenuIndex: number | null = null;
-let showAbout = false;
+let showSettings = false;
 let volume = 0.65;
 let tempo = 88;
+let instrument: Instrument = "piano";
+let bleedReverb = false;
 let audioContext: AudioContext | undefined;
 let masterGain: GainNode | undefined;
+let masterCompressor: DynamicsCompressorNode | undefined;
+let reverbImpulse: AudioBuffer | undefined;
+
+// The source piano has one sample every four semitones. The nearest sample is
+// pitch-shifted for intervening notes, retaining piano character in a small bundle.
+const PIANO_SAMPLE_URLS = new Map([
+  [48, "audio/C3.mp3"],
+  [52, "audio/E3.mp3"],
+  [56, "audio/Ab3.mp3"],
+  [60, "audio/C4.mp3"],
+  [64, "audio/E4.mp3"],
+  [68, "audio/Ab4.mp3"],
+  [72, "audio/C5.mp3"],
+  [76, "audio/E5.mp3"],
+  [80, "audio/Ab5.mp3"],
+  [84, "audio/C6.mp3"],
+]);
+const pianoBuffers = new Map<number, AudioBuffer>();
+let pianoLoading: Promise<void> | undefined;
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
 function saveState() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ selectedKey, mode, progression, volume, tempo }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ selectedKey, mode, progression, volume, tempo, instrument, bleedReverb }));
   } catch { /* Storage can be unavailable in a private browser context. */ }
 }
 
 function loadState() {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as Partial<{ selectedKey: string; mode: Mode; progression: Harmony[]; volume: number; tempo: number }> | null;
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as Partial<{ selectedKey: string; mode: Mode; progression: Harmony[]; volume: number; tempo: number; instrument: Instrument; bleedReverb: boolean }> | null;
     if (!saved) return;
     if (saved.selectedKey && keyChoices.includes(saved.selectedKey)) selectedKey = saved.selectedKey;
     if (saved.mode === "play" || saved.mode === "add") mode = saved.mode;
     if (Array.isArray(saved.progression)) progression = saved.progression.map(chord => ({ ...chord, voicing: Number(chord.voicing) || 0 }));
     if (typeof saved.volume === "number") volume = Math.min(1, Math.max(0, saved.volume));
     if (typeof saved.tempo === "number") tempo = Math.min(240, Math.max(40, saved.tempo));
+    if (saved.instrument === "piano" || saved.instrument === "sine") instrument = saved.instrument;
+    if (typeof saved.bleedReverb === "boolean") bleedReverb = saved.bleedReverb;
   } catch { /* Ignore malformed or old browser storage. */ }
 }
 
@@ -115,32 +139,103 @@ function chordLabel(chord: Harmony) {
   return `${chord.numeral}${suffix}`;
 }
 
+function loadPiano(context: AudioContext) {
+  pianoLoading ??= Promise.all(
+    [...PIANO_SAMPLE_URLS].map(async ([midi, url]) => {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Could not load piano sample: ${url}`);
+      pianoBuffers.set(midi, await context.decodeAudioData(await response.arrayBuffer()));
+    }),
+  )
+    .then(() => undefined)
+    .catch(error => {
+      console.warn("Piano samples could not be loaded; using the fallback synth.", error);
+    });
+  return pianoLoading;
+}
+
+function closestPianoSample(midi: number) {
+  let closest: [number, AudioBuffer] | undefined;
+  for (const sample of pianoBuffers) {
+    if (!closest || Math.abs(sample[0] - midi) < Math.abs(closest[0] - midi)) closest = sample;
+  }
+  return closest;
+}
+
+function createReverbImpulse(context: AudioContext) {
+  const duration = 1.6;
+  const impulse = context.createBuffer(2, context.sampleRate * duration, context.sampleRate);
+  for (let channel = 0; channel < impulse.numberOfChannels; channel++) {
+    const data = impulse.getChannelData(channel);
+    for (let index = 0; index < data.length; index++) {
+      data[index] = (Math.random() * 2 - 1) * (1 - index / data.length) ** 3;
+    }
+  }
+  return impulse;
+}
+
 function playChord(chord: Harmony, beats = chord.duration) {
   audioContext ??= new AudioContext();
+  const context = audioContext;
   if (!masterGain) {
-    masterGain = audioContext.createGain();
-    masterGain.connect(audioContext.destination);
+    masterGain = context.createGain();
+    masterCompressor = context.createDynamicsCompressor();
+    masterCompressor.threshold.value = -20;
+    masterCompressor.knee.value = 16;
+    masterCompressor.ratio.value = 8;
+    masterCompressor.attack.value = 0.003;
+    masterCompressor.release.value = 0.2;
+    masterGain.connect(masterCompressor).connect(context.destination);
+    reverbImpulse = createReverbImpulse(context);
   }
-  masterGain.gain.setValueAtTime(volume, audioContext.currentTime);
-  if (audioContext.state === "suspended") void audioContext.resume();
-  const now = audioContext.currentTime;
-  const duration = Math.max(0.45, beats * (60 / tempo) * 0.92);
-  for (const midi of chordNotes(chord)) {
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    const filter = audioContext.createBiquadFilter();
-    oscillator.type = "triangle";
-    oscillator.frequency.value = 440 * 2 ** ((midi - 69) / 12);
-    filter.type = "lowpass";
-    filter.frequency.value = 1800;
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.11, now + 0.025);
-    gain.gain.exponentialRampToValueAtTime(0.045, now + 0.17);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-    oscillator.connect(filter).connect(gain).connect(masterGain);
-    oscillator.start(now);
-    oscillator.stop(now + duration + 0.04);
-  }
+  masterGain.gain.setValueAtTime(volume, context.currentTime);
+  if (context.state === "suspended") void context.resume();
+  const output = masterGain;
+  const impulse = reverbImpulse!;
+  const allowReverbBleed = bleedReverb;
+
+  const playNotes = () => {
+    const now = context.currentTime;
+    const duration = Math.max(0.45, beats * (60 / tempo) * 0.92);
+    const chordOutput = context.createGain();
+    const reverb = context.createConvolver();
+    const reverbGain = context.createGain();
+    reverb.buffer = impulse;
+    reverbGain.gain.setValueAtTime(0.42, now);
+    chordOutput.connect(output);
+    chordOutput.connect(reverb).connect(reverbGain).connect(output);
+    if (!allowReverbBleed) {
+      reverbGain.gain.setValueAtTime(0.42, now + Math.max(0, duration - 0.04));
+      reverbGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    }
+    for (const midi of chordNotes(chord)) {
+      const sample = instrument === "piano" ? closestPianoSample(midi) : undefined;
+      const source: AudioBufferSourceNode | OscillatorNode = sample ? context.createBufferSource() : context.createOscillator();
+      const gain = context.createGain();
+      if (sample && source instanceof AudioBufferSourceNode) {
+        source.buffer = sample[1];
+        source.playbackRate.value = 2 ** ((midi - sample[0]) / 12);
+      } else if (source instanceof OscillatorNode) {
+        source.type = "sine";
+        source.frequency.value = 440 * 2 ** ((midi - 69) / 12);
+      }
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(sample ? 0.5 : 0.11, now + 0.012);
+      gain.gain.exponentialRampToValueAtTime(sample ? 0.24 : 0.045, now + 0.16);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      source.connect(gain).connect(chordOutput);
+      source.start(now);
+      source.stop(now + duration + 0.04);
+    }
+    window.setTimeout(() => {
+      chordOutput.disconnect();
+      reverb.disconnect();
+      reverbGain.disconnect();
+    }, (duration + (allowReverbBleed ? 1.7 : 0.1)) * 1000);
+  };
+
+  if (instrument === "sine" || pianoBuffers.size) playNotes();
+  else void loadPiano(context).then(playNotes);
 }
 
 function selectChord(chord: Harmony) {
@@ -178,16 +273,25 @@ function renderPalette() {
   return `<main class="palette"><section class="primary-palette"><div class="palette-label"><span>DIATONIC + SECONDARY DOMINANTS</span><small>color tones and V/x options resolve to the chord above</small></div><div class="chord-grid">${cards}</div></section></main>`;
 }
 
-function renderAbout() {
-  if (!showAbout) return "";
-  return `<div class="modal-backdrop" data-close-about>
-    <section class="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title" onclick="event.stopPropagation()">
-      <div class="about-title"><h2 id="about-title">ABOUT</h2><button data-close-about aria-label="Close about window">×</button></div>
+function renderSettings() {
+  if (!showSettings) return "";
+  return `<div class="modal-backdrop" data-close-settings>
+    <section class="about-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" onclick="event.stopPropagation()">
+      <div class="about-title"><h2 id="settings-title">SETTINGS</h2><button data-close-settings aria-label="Close settings window">×</button></div>
+      <section class="settings-section">
+        <h3>SOUND</h3>
+        <div class="settings-row"><label for="instrument-select">INSTRUMENT</label><select id="instrument-select"><option value="piano" ${instrument === "piano" ? "selected" : ""}>GRAND PIANO</option><option value="sine" ${instrument === "sine" ? "selected" : ""}>SINE WAVE</option></select></div>
+        <label class="bleed-toggle"><input id="bleed-reverb" type="checkbox" ${bleedReverb ? "checked" : ""} /><span>BLEED REVERB BETWEEN CHORDS</span><b>${bleedReverb ? "ON" : "OFF"}</b></label>
+        <small class="settings-help">Reverb is always active; enable bleed to let its tail continue into the next chord.</small>
+      </section>
+      <h3>ABOUT</h3>
       <p><b>Roman Playground</b> is a tiny, browser-only space for trying harmonic ideas by ear.</p>
       <h3>HOW TO USE IT</h3>
-      <p>Choose a key, then use <b>PLAY</b> to audition chords or <b>ADD</b> to make a progression. Drag a palette chord into the progression to insert it, or drag progression cards to reorder them; drag a card outside the progression strip to remove it. Right-click a card (or use <b>•••</b>) to change its duration, bump its voicing, or remove it.</p>
+      <p>Choose a key, select an instrument in Settings, then use <b>PLAY</b> to audition chords or <b>ADD</b> to make a progression. Drag a palette chord into the progression to insert it, or drag progression cards to reorder them; drag a card outside the progression strip to remove it. Right-click a card (or use <b>•••</b>) to change its duration, bump its voicing, or remove it.</p>
       <h3>SOUND + LICENSE</h3>
-      <p>Sound is synthesized in your browser with the Web Audio API; no samples or data leave your device. Source code is © Artemis Rosman and released under the <a href="LICENSE" target="_blank">MIT License</a>.</p>
+      <p>Grand Piano uses locally served samples rendered from <b>Full Grand Piano</b>; Sine Wave is synthesized with the Web Audio API. Audio stays in your browser after the local samples load. Source code is © Artemis Rosman and released under the <a href="LICENSE" target="_blank">MIT License</a>.</p>
+      <h3>PIANO ATTRIBUTION</h3>
+      <p><b>Full Grand Piano</b> SoundFont samples are licensed under the <a href="https://artlibre.org/licence/lal/en/" target="_blank" rel="noopener noreferrer">Free Art License 1.3</a>.</p>
     </section>
   </div>`;
 }
@@ -227,8 +331,8 @@ function render() {
       <label class="volume-control">VOL <input id="volume" type="range" min="0" max="1" step="0.05" value="${volume}" aria-label="Volume" /></label>
       <label class="tempo-control">BPM <input id="tempo" type="number" min="40" max="240" step="1" value="${tempo}" aria-label="Tempo in beats per minute" /></label>
       <div class="mode-toggle" role="group" aria-label="Chord action"><button data-mode="play" class="${mode === "play" ? "active" : ""}">♬ HEAR</button><button data-mode="add" class="${mode === "add" ? "active" : ""}">+ ADD</button></div>
-      <button class="about-button" data-open-about>ABOUT</button>
-    </div></header>${renderProgression()}${renderPalette()}<footer><span>© Artemis Rosman · <a href="LICENSE" target="_blank">MIT License</a></span><span>Roman Playground</span></footer>${renderAbout()}`;
+      <button class="about-button" data-open-settings>SETTINGS</button>
+    </div></header>${renderProgression()}${renderPalette()}<footer><span>© Artemis Rosman · <a href="LICENSE" target="_blank">MIT License</a></span><span>Roman Playground</span></footer>${renderSettings()}`;
   bindEvents();
 }
 
@@ -249,8 +353,10 @@ function bindEvents() {
   document.querySelector("#key-select")?.addEventListener("change", event => { selectedKey = (event.target as HTMLSelectElement).value; render(); });
   document.querySelector("#volume")?.addEventListener("input", event => { volume = Number((event.target as HTMLInputElement).value); if (audioContext && masterGain) masterGain.gain.setValueAtTime(volume, audioContext.currentTime); });
   document.querySelector("#tempo")?.addEventListener("change", event => { const input = event.target as HTMLInputElement; tempo = Math.min(240, Math.max(40, Number(input.value) || 88)); input.value = String(tempo); });
-  document.querySelector("[data-open-about]")?.addEventListener("click", () => { showAbout = true; render(); });
-  document.querySelectorAll("[data-close-about]").forEach(element => element.addEventListener("click", () => { showAbout = false; render(); }));
+  document.querySelector("#bleed-reverb")?.addEventListener("change", event => { bleedReverb = (event.target as HTMLInputElement).checked; render(); });
+  document.querySelector("#instrument-select")?.addEventListener("change", event => { instrument = (event.target as HTMLSelectElement).value as Instrument; render(); });
+  document.querySelector("[data-open-settings]")?.addEventListener("click", () => { showSettings = true; render(); });
+  document.querySelectorAll("[data-close-settings]").forEach(element => element.addEventListener("click", () => { showSettings = false; render(); }));
   document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(button => button.addEventListener("click", () => { mode = button.dataset.mode as Mode; render(); }));
   document.querySelectorAll<HTMLButtonElement>("[data-chord]").forEach(button => {
     button.addEventListener("click", () => selectChord(JSON.parse(button.dataset.chord!)));
