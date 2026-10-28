@@ -18,7 +18,7 @@ type Harmony = {
 const keyChoices = [
   "C major", "G major", "D major", "A major", "E major", "B major", "F# major",
   "F major", "Bb major", "Eb major", "Ab major", "Db major",
-  "A minor", "E minor", "B minor", "F# minor", "C# minor", "D minor", "G minor", "C minor",
+  "A minor", "E minor", "B minor", "F# minor", "C# minor", "D minor", "Eb minor", "F minor", "G minor", "Ab minor", "Bb minor", "C minor",
 ];
 const NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
 const MAJOR = [0, 2, 4, 5, 7, 9, 11];
@@ -185,7 +185,7 @@ function renderAbout() {
       <div class="about-title"><h2 id="about-title">ABOUT</h2><button data-close-about aria-label="Close about window">×</button></div>
       <p><b>Roman Playground</b> is a tiny, browser-only space for trying harmonic ideas by ear.</p>
       <h3>HOW TO USE IT</h3>
-      <p>Choose a key, then use <b>PLAY</b> to audition chords or <b>ADD</b> to make a progression. Drag progression cards to reorder them. Right-click a card (or use <b>•••</b>) to change its duration, bump its voicing, or remove it.</p>
+      <p>Choose a key, then use <b>PLAY</b> to audition chords or <b>ADD</b> to make a progression. Drag a palette chord into the progression to insert it, or drag progression cards to reorder them; drag a card outside the progression strip to remove it. Right-click a card (or use <b>•••</b>) to change its duration, bump its voicing, or remove it.</p>
       <h3>SOUND + LICENSE</h3>
       <p>Sound is synthesized in your browser with the Web Audio API; no samples or data leave your device. Source code is © Artemis Rosman and released under the <a href="LICENSE" target="_blank">MIT License</a>.</p>
     </section>
@@ -232,6 +232,19 @@ function render() {
   bindEvents();
 }
 
+function dropIndex(event: DragEvent, item: HTMLElement) {
+  const index = Number(item.dataset.index);
+  const bounds = item.getBoundingClientRect();
+  return event.clientX < bounds.left + bounds.width / 2 ? index : index + 1;
+}
+
+function isOverProgression(event: DragEvent) {
+  const progressionStrip = document.querySelector("#progression");
+  if (!progressionStrip) return false;
+  const bounds = progressionStrip.getBoundingClientRect();
+  return event.clientX >= bounds.left && event.clientX <= bounds.right && event.clientY >= bounds.top && event.clientY <= bounds.bottom;
+}
+
 function bindEvents() {
   document.querySelector("#key-select")?.addEventListener("change", event => { selectedKey = (event.target as HTMLSelectElement).value; render(); });
   document.querySelector("#volume")?.addEventListener("input", event => { volume = Number((event.target as HTMLInputElement).value); if (audioContext && masterGain) masterGain.gain.setValueAtTime(volume, audioContext.currentTime); });
@@ -248,15 +261,60 @@ function bindEvents() {
   document.querySelector("#play-progression")?.addEventListener("click", () => isLooping ? stopLoop() : startLoop());
   document.querySelectorAll<HTMLButtonElement>("[data-play-index]").forEach(button => button.addEventListener("click", () => playChord(progression[Number(button.dataset.playIndex)])));
   document.querySelectorAll<HTMLButtonElement>("[data-menu-index]").forEach(button => button.addEventListener("click", () => { contextMenuIndex = Number(button.dataset.menuIndex); render(); }));
-  document.querySelector("#progression")?.addEventListener("dragover", event => { const dragEvent = event as DragEvent; if (dragEvent.dataTransfer?.types.includes("application/x-roman-chord")) dragEvent.preventDefault(); });
-  document.querySelector("#progression")?.addEventListener("drop", event => { const dragEvent = event as DragEvent; const serialized = dragEvent.dataTransfer?.getData("application/x-roman-chord"); if (!serialized) return; dragEvent.preventDefault(); try { const chord = JSON.parse(serialized) as Harmony; progression.push({ ...chord, notes: chordNotes(chord) }); render(); } catch { /* Ignore invalid external drag data. */ } });
+  document.querySelector("#progression")?.addEventListener("dragover", event => {
+    const dragEvent = event as DragEvent;
+    if (!dragEvent.dataTransfer?.types.includes("application/x-roman-chord")) return;
+    dragEvent.preventDefault();
+    dragEvent.dataTransfer.dropEffect = "copy";
+  });
+  document.querySelector("#progression")?.addEventListener("drop", event => {
+    const dragEvent = event as DragEvent;
+    const serialized = dragEvent.dataTransfer?.getData("application/x-roman-chord");
+    if (!serialized) return;
+    dragEvent.preventDefault();
+    try {
+      const chord = JSON.parse(serialized) as Harmony;
+      progression.push({ ...chord, notes: chordNotes(chord) });
+      render();
+    } catch { /* Ignore invalid external drag data. */ }
+  });
   document.querySelectorAll<HTMLElement>(".progression-chord").forEach(item => {
     item.addEventListener("contextmenu", event => { event.preventDefault(); contextMenuIndex = Number(item.dataset.index); render(); });
     item.addEventListener("dragstart", event => { event.dataTransfer?.setData("text/plain", item.dataset.index!); if (event.dataTransfer) event.dataTransfer.effectAllowed = "move"; item.classList.add("dragging"); });
-    item.addEventListener("dragend", event => { document.querySelectorAll(".drag-over, .dragging").forEach(element => element.classList.remove("drag-over", "dragging")); if (event.dataTransfer?.dropEffect === "none") { progression.splice(Number(item.dataset.index), 1); render(); } });
-    item.addEventListener("dragover", event => { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = "move"; document.querySelectorAll(".drag-over").forEach(element => element.classList.remove("drag-over")); item.classList.add("drag-over"); });
+    item.addEventListener("dragend", event => {
+      document.querySelectorAll(".drag-over, .dragging").forEach(element => element.classList.remove("drag-over", "dragging"));
+      if (!isOverProgression(event as DragEvent)) {
+        progression.splice(Number(item.dataset.index), 1);
+        render();
+      }
+    });
+    item.addEventListener("dragover", event => {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = event.dataTransfer.types.includes("application/x-roman-chord") ? "copy" : "move";
+      document.querySelectorAll(".drag-over").forEach(element => element.classList.remove("drag-over"));
+      item.classList.add("drag-over");
+    });
     item.addEventListener("dragleave", () => item.classList.remove("drag-over"));
-    item.addEventListener("drop", event => { event.preventDefault(); const serialized = event.dataTransfer?.getData("application/x-roman-chord"); const to = Number(item.dataset.index); if (serialized) { event.stopPropagation(); try { const chord = JSON.parse(serialized) as Harmony; progression.splice(to, 0, { ...chord, notes: chordNotes(chord) }); } catch { /* Ignore invalid external drag data. */ } render(); return; } const from = Number(event.dataTransfer?.getData("text/plain")); if (from !== to) { const [moved] = progression.splice(from, 1); progression.splice(to, 0, moved); } render(); });
+    item.addEventListener("drop", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const serialized = event.dataTransfer?.getData("application/x-roman-chord");
+      const to = dropIndex(event as DragEvent, item);
+      if (serialized) {
+        try {
+          const chord = JSON.parse(serialized) as Harmony;
+          progression.splice(to, 0, { ...chord, notes: chordNotes(chord) });
+        } catch { /* Ignore invalid external drag data. */ }
+        render();
+        return;
+      }
+      const from = Number(event.dataTransfer?.getData("text/plain"));
+      if (Number.isInteger(from) && from >= 0 && from < progression.length) {
+        const [moved] = progression.splice(from, 1);
+        progression.splice(from < to ? to - 1 : to, 0, moved);
+      }
+      render();
+    });
   });
   document.querySelector("[data-close-menu]")?.addEventListener("click", () => { contextMenuIndex = null; render(); });
   document.querySelectorAll<HTMLButtonElement>("[data-duration]").forEach(button => button.addEventListener("click", () => { if (contextMenuIndex !== null) progression[contextMenuIndex].duration = Number(button.dataset.duration); render(); }));
