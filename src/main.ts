@@ -34,6 +34,8 @@ const STORAGE_KEY = "roman-playground-state";
 let selectedKey = "C major";
 let mode: Mode = "play";
 let progression: Harmony[] = [];
+// Rendered once after a palette drop so the inserted card has a clear arrival cue.
+let insertedChordIndex: number | null = null;
 let isLooping = false;
 let loopTimer: number | undefined;
 let contextMenuIndex: number | null = null;
@@ -288,7 +290,7 @@ function renderSettings() {
       <h3>ABOUT</h3>
       <p><b>Roman Playground</b> is a tiny, browser-only space for trying harmonic ideas by ear.</p>
       <h3>HOW TO USE IT</h3>
-      <p>Choose a key, select an instrument in Settings, then use <b>PLAY</b> to audition chords or <b>ADD</b> to make a progression. Drag a palette chord into the progression to insert it, or drag progression cards to reorder them; drag a card outside the progression strip to remove it. Right-click a card (or use <b>•••</b>) to change its duration, bump its voicing, or remove it.</p>
+      <p>Choose a key, select an instrument in Settings, then use <b>PLAY</b> to audition chords or <b>ADD</b> to make a progression. Drag a palette chord into the progression to insert it, or use a progression card’s <b>⠿</b> handle to reorder it. On desktop, drag a card itself and use <b>•••</b> for options; on mobile, use the <b>⠿</b> handle and long-press a card for options.</p>
       <h3>SOUND + LICENSE</h3>
       <p>Grand Piano uses locally served samples rendered from <b>Full Grand Piano</b>; Sine Wave is synthesized with the Web Audio API. Audio stays in your browser after the local samples load. Source code is © Artemis Rosman and released under the <a href="LICENSE" target="_blank">MIT License</a>.</p>
       <h3>PIANO ATTRIBUTION</h3>
@@ -302,9 +304,9 @@ function voicingLabel(chord: Harmony) {
 }
 
 function renderProgression() {
-  const items = progression.map((chord, index) => `<li class="progression-chord" data-index="${index}">
+  const items = progression.map((chord, index) => `<li class="progression-chord${index === insertedChordIndex ? " drop-in" : ""}" data-index="${index}">
     <button class="sequence-play" data-play-index="${index}" title="Play chord"><strong>${chordLabel(chord)}</strong><span>${chordNotes(chord).map(noteName).join(" · ")}</span><em>${chord.duration} beat${chord.duration === 1 ? "" : "s"} · ${voicingLabel(chord)}</em></button>
-    <aside class="card-sidebar"><button class="card-delete" data-card-delete="${index}" title="Remove chord" aria-label="Remove ${chordLabel(chord)}">×</button><div class="card-voicing" aria-label="Quick voicing controls"><button data-card-bump="up" data-card-index="${index}" title="Bump bottom note up an octave">↑</button><button data-card-bump="down" data-card-index="${index}" title="Bump top note down an octave">↓</button></div><button class="more" data-menu-index="${index}" title="Chord options" aria-label="Chord options">•••</button></aside>
+    <aside class="card-sidebar"><button class="card-delete" data-card-delete="${index}" title="Remove chord" aria-label="Remove ${chordLabel(chord)}">×</button><div class="card-voicing" aria-label="Quick voicing controls"><button data-card-bump="up" data-card-index="${index}" title="Bump bottom note up an octave">↑</button><button data-card-bump="down" data-card-index="${index}" title="Bump top note down an octave">↓</button></div><button class="more" data-menu-index="${index}" title="Chord options" aria-label="Chord options">•••</button><button class="card-drag-handle" data-drag-index="${index}" title="Hold then drag to reorder" aria-label="Hold then drag ${chordLabel(chord)} to reorder">⠿</button></aside>
   </li>`).join("");
   return `<section class="sequence-area">
     <div class="sequence-heading"><span>PROGRESSION <b>${progression.length || "—"} chord${progression.length === 1 ? "" : "s"}</b></span>
@@ -335,6 +337,7 @@ function render() {
       <button class="about-button" data-open-settings>SETTINGS</button>
     </div></header>${renderProgression()}${renderPalette()}<footer><span>© Artemis Rosman · <a href="LICENSE" target="_blank">MIT License</a></span><span>Roman Playground</span></footer>${renderSettings()}`;
   bindEvents();
+  insertedChordIndex = null;
 }
 
 function bindEvents() {
@@ -365,16 +368,68 @@ function bindEvents() {
   document.querySelectorAll<HTMLButtonElement>("[data-card-delete]").forEach(button => button.addEventListener("click", () => { progression.splice(Number(button.dataset.cardDelete), 1); render(); }));
   document.querySelector("[data-delete]")?.addEventListener("click", () => { if (contextMenuIndex !== null) progression.splice(contextMenuIndex, 1); contextMenuIndex = null; render(); });
   bindDragInteractions();
+  bindProgressionLongPressMenus();
+}
+
+function bindProgressionLongPressMenus() {
+  document.querySelectorAll<HTMLButtonElement>("[data-play-index]").forEach(button => {
+    let pointerId: number | undefined;
+    let startX = 0;
+    let startY = 0;
+    let timer: number | undefined;
+    let suppressClick = false;
+    const cancel = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = undefined;
+    };
+
+    button.addEventListener("pointerdown", event => {
+      if (!event.isPrimary || event.pointerType !== "touch" || event.button !== 0) return;
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startY = event.clientY;
+      button.setPointerCapture(event.pointerId);
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        suppressClick = true;
+        contextMenuIndex = Number(button.dataset.playIndex);
+        render();
+      }, 500);
+    });
+    button.addEventListener("pointermove", event => {
+      if (event.pointerId === pointerId && Math.hypot(event.clientX - startX, event.clientY - startY) > 10) cancel();
+    });
+    button.addEventListener("pointerup", event => {
+      if (event.pointerId !== pointerId) return;
+      cancel();
+      try { button.releasePointerCapture(event.pointerId); } catch { /* Capture can be released by a scroll gesture. */ }
+      pointerId = undefined;
+    });
+    button.addEventListener("pointercancel", () => { cancel(); pointerId = undefined; });
+    button.addEventListener("click", event => {
+      if (!suppressClick) return;
+      suppressClick = false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+  });
 }
 
 function bindDragInteractions() {
   const drag = new DragController<Harmony>({
     progression: () => document.querySelector<HTMLElement>("#progression"),
     paletteSources: () => [...document.querySelectorAll<HTMLButtonElement>("[data-chord]")].map(button => [button, JSON.parse(button.dataset.chord!) as Harmony] as [HTMLButtonElement, Harmony]),
-    progressionSources: () => [...document.querySelectorAll<HTMLButtonElement>("[data-play-index]")].map(button => [button, Number(button.dataset.playIndex)] as [HTMLButtonElement, number]),
-    paletteDragEnabled: () => mode === "play",
+    progressionSources: () => {
+      const mobile = window.matchMedia("(max-width: 560px)").matches;
+      const selector = mobile ? "[data-drag-index]" : "[data-play-index]";
+      const dataKey = mobile ? "dragIndex" : "playIndex";
+      return [...document.querySelectorAll<HTMLButtonElement>(selector)].map(button => [button, Number(button.dataset[dataKey])] as [HTMLButtonElement, number]);
+    },
+    // Clicks respect HEAR/ADD mode; dragging always means "insert here".
+    paletteDragEnabled: () => true,
     insert: (index, chord) => {
       progression.splice(index, 0, { ...chord, notes: chordNotes(chord) });
+      insertedChordIndex = index;
       render();
     },
     move: (from, to) => {
@@ -383,7 +438,6 @@ function bindDragInteractions() {
       progression.splice(from < to ? to - 1 : to, 0, moved);
       render();
     },
-    openMenu: index => { contextMenuIndex = index; render(); },
   });
   drag.bind();
 }

@@ -9,11 +9,12 @@ type DragControllerOptions<T> = {
   paletteDragEnabled: () => boolean;
   insert: (index: number, chord: T) => void;
   move: (from: number, to: number) => void;
-  openMenu: (index: number) => void;
 };
 
 const DRAG_THRESHOLD = 10;
-const LONG_PRESS_MS = 500;
+// Touch reordering starts from a dedicated handle, keeping horizontal swipes on
+// a card available for scrolling the progression.
+const TOUCH_REORDER_HOLD_MS = 280;
 const EDGE_SCROLL_ZONE = 44;
 const EDGE_SCROLL_SPEED = 12;
 
@@ -47,16 +48,16 @@ export class DragController<T> {
     let startY = 0;
     let dragging = false;
     let suppressClick = false;
-    let longPressTimer: number | undefined;
-    let longPressArmed = false;
+    let reorderHoldTimer: number | undefined;
+    let reorderReady = true;
 
-    const clearLongPress = () => {
-      if (longPressTimer !== undefined) window.clearTimeout(longPressTimer);
-      longPressTimer = undefined;
+    const clearReorderHold = () => {
+      if (reorderHoldTimer !== undefined) window.clearTimeout(reorderHoldTimer);
+      reorderHoldTimer = undefined;
     };
     const sourceCard = () => element.closest<HTMLElement>(".progression-chord") ?? element;
     const cleanup = () => {
-      clearLongPress();
+      clearReorderHold();
       pointerId = undefined;
       sourceCard().classList.remove("dragging");
       this.stopDragVisuals();
@@ -69,17 +70,16 @@ export class DragController<T> {
       startX = event.clientX;
       startY = event.clientY;
       dragging = false;
-      longPressArmed = false;
+      reorderReady = source.kind !== "progression" || event.pointerType !== "touch";
       element.setPointerCapture(event.pointerId);
-      if (source.kind === "progression") {
-        longPressTimer = window.setTimeout(() => { longPressArmed = true; }, LONG_PRESS_MS);
+      if (source.kind === "progression" && !reorderReady) {
+        reorderHoldTimer = window.setTimeout(() => { reorderReady = true; }, TOUCH_REORDER_HOLD_MS);
       }
     });
 
     element.addEventListener("pointermove", event => {
       if (event.pointerId !== pointerId) return;
-      if (!dragging && Math.hypot(event.clientX - startX, event.clientY - startY) >= DRAG_THRESHOLD) {
-        clearLongPress();
+      if (!dragging && reorderReady && Math.hypot(event.clientX - startX, event.clientY - startY) >= DRAG_THRESHOLD) {
         dragging = true;
         suppressClick = true;
         sourceCard().classList.add("dragging");
@@ -94,7 +94,6 @@ export class DragController<T> {
     element.addEventListener("pointerup", event => {
       if (event.pointerId !== pointerId) return;
       const wasDragging = dragging;
-      const wasLongPress = longPressArmed;
       const dropIndex = wasDragging ? this.dropIndexAt(event.clientX, event.clientY) : null;
       try { element.releasePointerCapture(event.pointerId); } catch { /* Pointer capture can already be released. */ }
       cleanup();
@@ -102,9 +101,6 @@ export class DragController<T> {
       if (wasDragging && dropIndex !== null) {
         if (source.kind === "palette") this.options.insert(dropIndex, source.chord);
         else this.options.move(source.from, dropIndex);
-      } else if (wasLongPress && source.kind === "progression") {
-        suppressClick = true;
-        this.options.openMenu(source.from);
       }
     });
 
